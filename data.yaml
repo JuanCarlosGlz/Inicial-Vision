@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 6
+names: ['Cubo', 'Esfera', 'Martillo', 'cilindro', 'marker', 'pieza_amarilla']
+
+roboflow:
+  workspace: cinestav
+  project: yolo-trial-l4ob2
+  version: 5
+  license: Private
+  url: https://app.roboflow.com/cinestav/yolo-trial-l4ob2/5

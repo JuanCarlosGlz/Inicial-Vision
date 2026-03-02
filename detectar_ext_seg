@@ -1,0 +1,73 @@
+import cv2
+from ultralytics import YOLO, SAM  # 1. IMPORTACIÓN: Añadimos SAM
+
+# --- CONFIGURACIÓN DE ESCALA ---
+# Mide con una regla en tu pantalla: ¿Cuántos píxeles hay en 10cm reales?
+# Ejemplo: si 100 píxeles = 10cm, entonces PPM = 10.0
+PIXELS_PER_CM = 15.5  # AJUSTA ESTE VALOR SEGÚN TU DISTANCIA
+
+# Cargar modelos
+yolo_model = YOLO("runs/detect/train3/weights/best.pt")
+sam_model = SAM("sam2_s.pt")  # 2. CARGA DE MODELO: Cargamos SAM V2 'small'
+cap = cv2.VideoCapture(1)
+
+while True:
+    ret, frame = cap.read()
+    if not ret: break
+
+    # Obtener dimensiones del frame para hallar el centro
+    alto, ancho, _ = frame.shape
+    centro_pantalla_x = ancho // 2
+    centro_pantalla_y = alto // 2
+
+    # Dibujar los ejes del "Mundo Real" (Opcional, para visualizar)
+    cv2.line(frame, (centro_pantalla_x, 0), (centro_pantalla_x, alto), (255, 255, 255), 1)
+    cv2.line(frame, (0, centro_pantalla_y), (ancho, centro_pantalla_y), (255, 255, 255), 1)
+    cv2.circle(frame, (centro_pantalla_x, centro_pantalla_y), 5, (0, 0, 255), -1)
+
+    # Detección con YOLO (stream=False para procesar resultados inmediatamente)
+    results_yolo = yolo_model(frame, conf=0.6, verbose=False)
+
+    for r in results_yolo:
+        if r.boxes:
+            # --- 3. INTEGRACIÓN SAM V2 ---
+            # Extraer todas las cajas detectadas por YOLO en este frame
+            bboxes = r.boxes.xyxy.cpu().numpy()
+            
+            # Pasar las cajas a SAM 2 para segmentar los objetos exactos
+            results_sam = sam_model(frame, bboxes=bboxes, verbose=False)
+            
+            # Dibujar las máscaras de SAM sobre el frame original
+            if results_sam[0].masks is not None:
+                frame = results_sam[0].plot(labels=False, boxes=False) # Plot solo máscaras
+
+            # Volvemos a tu lógica original para calcular coordenadas
+            for box in r.boxes:
+                # 1. Obtener centro del objeto en PÍXELES
+                x1, y1, x2, y2 = box.xyxy[0]
+                obj_x = int((x1 + x2) / 2)
+                obj_y = int((y1 + y2) / 2)
+
+                # 2. Calcular distancia en PÍXELES desde el centro (0,0)
+                # Restamos para que el centro de la cámara sea el origen
+                dist_pixeles_x = obj_x - centro_pantalla_x
+                dist_pixeles_y = centro_pantalla_y - obj_y # Invertimos Y para que arriba sea positivo
+
+                # 3. CONVERSIÓN A MUNDO REAL (cm)
+                mundo_x = dist_pixeles_x / PIXELS_PER_CM
+                mundo_y = dist_pixeles_y / PIXELS_PER_CM
+
+                # Visualización original
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.circle(frame, (obj_x, obj_y), 5, (255, 0, 0), -1)
+                
+                # Mostrar coordenadas reales
+                texto = f"X: {mundo_x:.1f}cm, Y: {mundo_y:.1f}cm"
+                cv2.putText(frame, texto, (obj_x + 10, obj_y - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    cv2.imshow("Coordenadas del Mundo Real con SAM V2", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'): break
+
+cap.release()
+cv2.destroyAllWindows()
